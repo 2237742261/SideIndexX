@@ -2,6 +2,12 @@
 
 ColorOS 上的边缘侧滑字母索引：屏幕边缘竖滑呼出索引条，按字母快速找应用。
 
+## 下载
+
+APK 在 Releases 里：<https://github.com/2237742261/SideIndexX/releases/latest>
+
+当前版本 **1.31.11**（约 117 KB），安装后到 LSPosed 里启用模块，作用域只勾 `com.android.systemui`，然后重启系统界面。
+
 ## 功能
 
 - 呼出范围：仅桌面 / 全局（任何应用里都能呼出）
