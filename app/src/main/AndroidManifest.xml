@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- 配置通道写入系统设置库；可用 pm grant / root 授予，未授予时退化成 su 命令 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- 读取前台应用（只有 SystemUI 侧反射 ActivityTaskManager 失败时才用，需要 appops 授权） -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_side_index_flyme"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".settings.AppPickerActivity"
+            android:exported="false"
+            android:label="@string/pick_app" />
+
+        <!-- 配置读取通道（跨应用免权限调用；SystemUI 承载模式下优先走 Settings.Secure） -->
+        <provider
+            android:name=".settings.ConfigProvider"
+            android:authorities="com.eta.sideindexx.config"
+            android:enabled="true"
+            android:exported="true" />
+
+        <!-- ============ LSPosed 模块声明 ============ -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="@string/xposed_description" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+        <meta-data android:name="xposedsharedprefs" android:value="true" />
+    </application>
+</manifest>

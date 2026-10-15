@@ -1,0 +1,10 @@
+*.apk
+*.idsig
+*.keystore
+*.tar.gz
+build/
+build-ondevice/
+.gradle/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
