@@ -1,12 +1,12 @@
-# 侧滑索引（SideIndexX）
+# 侧滑索引
 
-ColorOS 上的边缘侧滑字母索引：屏幕边缘竖滑呼出索引条，按字母快速找应用。
+ColorOS 17 上的边缘侧滑字母索引：屏幕边缘竖滑呼出索引条，按字母快速找应用。
 
 ## 下载
 
 APK 在 Releases 里：<https://github.com/2237742261/SideIndexX/releases/latest>
 
-当前版本 **1.32.0**（约 120 KB），已迁移到 **libxposed 新版 API（API 102）**。
+当前版本 **1.32.1**（约 120 KB），已迁移到 **libxposed 新版 API（API 102）**。
 安装后到 LSPosed 里启用模块（作用域已固定在「系统界面」，不用手动勾），然后重启系统界面。
 
 > ⚠️ 需要 **LSPosed 2.x**（提供 libxposed API 102，实测 2.2.1 可用）。
@@ -70,6 +70,9 @@ kill -9 $(pidof com.android.systemui)
 >   相关钩子都做了存在性保护，钩不到时会退化成原生行为，不会崩。
 
 ## 更新日志
+
+**1.32.1**
+- LSPosed 里的模块卡片说明精简为「屏幕边缘上下滑动呼出字母索引」（原来是一长段功能罗列）。
 
 **1.32.0**
 - 迁移到 LSPosed 新版 libxposed API（`targetApiVersion=102`）：入口改由 `META-INF/xposed/java_init.list` 声明，模块元信息走 `META-INF/xposed/module.prop`，不再调用 `de.robv.android.xposed.*` 旧 API（旧 API 在新版框架下已被禁用）。

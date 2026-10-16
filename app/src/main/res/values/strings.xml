@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">侧滑索引</string>
     <string name="pick_app">选择应用</string>
-    <string name="xposed_description">边缘滑动呼出全局字母索引页：由系统界面进程承载，划掉后台也能用；支持应用范围筛选、字母条样式自定义、小窗打开应用。</string>
+    <string name="xposed_description">屏幕边缘上下滑动呼出字母索引</string>
     <string name="scope_hint_packages">com.android.systemui</string>
 </resources>
