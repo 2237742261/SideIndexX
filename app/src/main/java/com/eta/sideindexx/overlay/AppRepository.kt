@@ -55,6 +55,9 @@ object AppRepository {
 
     @Volatile private var refreshing = false
 
+    /** [probeAsync] 的轮询次数上限（只在开机早期清单残缺时用） */
+    @Volatile private var probeCount = 0
+
     fun apps(ctx: Context, force: Boolean = false): List<LaunchableApp> {
         val now = System.currentTimeMillis()
         val ttl = if (isSettled()) CACHE_TTL_MS else EARLY_TTL_MS
@@ -76,6 +79,14 @@ object AppRepository {
             }
         }
         return cached
+    }
+
+    /** 清单还没像样（开机早期 PackageManager 还没扫完）时主动补全：无条件后台重查一次，不阻塞调用方 */
+    fun probeAsync(ctx: Context) {
+        // 上限兜底：真有"可启动应用本来就不足 15 个"的设备，别无限轮询（60 × 2.5s = 150s）
+        if (isSettled() || probeCount >= 60) return
+        probeCount++
+        refreshAsync(ctx)
     }
 
     /** 后台刷新应用清单（结果只覆盖缓存，不阻塞调用方） */

@@ -15,8 +15,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TC=${TOOLCHAIN:-/workspace/toolchain}
 SRC="$ROOT/app/src/main"
 OUT="$ROOT/build-ondevice"
-VERSION_NAME=${VERSION_NAME:-1.31.7}
-VERSION_CODE=${VERSION_CODE:-151}
+VERSION_NAME=${VERSION_NAME:-1.32.3}
+VERSION_CODE=${VERSION_CODE:-173}
+
 
 # SHRINK=1（默认）：用 R8 收缩 dex（classes.dex 从 2.2MB → 143KB，见 tools/keep.pro）
 # SHRINK=0：退回旧的 D8 全量 dex（排查“装了新版功能没变化/闪退”时的对照用）

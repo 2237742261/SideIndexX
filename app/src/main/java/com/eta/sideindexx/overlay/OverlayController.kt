@@ -171,9 +171,12 @@ class OverlayController(
                 syncStrips()
                 syncStripTouchability()
                 if (!AppRepository.isSettled()) {
-                    // 开机早期 PackageManager 还没扫完，清单会残缺：靠短 TTL 反复重查补全
-                    AppRepository.apps(context)
+                    // 开机早期 PackageManager 还没扫完，清单会残缺：主动后台重查补全。
+                    // ⚠️ 不能只靠 apps() 的短 TTL：心跳周期和 TTL 都是 2.5s，边界上常常刚好
+                    // 判定"缓存还没过期"而整拍不查，补全被拖到用户呼出那一刻才发生。
+                    AppRepository.probeAsync(context)
                 } else if (AppRepository.groups().isEmpty()) {
+
                     AppRepository.prewarm(context)
                 }
                 cleanupStaleOverlay()
@@ -1107,12 +1110,14 @@ class OverlayController(
             return
         }
         val loaded = AppRepository.apps(context)
-        if (!AppRepository.isSettled() && activateRetries < 4) {
+        if (!AppRepository.isSettled() && activateRetries < 8) {
             // 开机头几秒 PackageManager 还没扫完，清单是残缺的（曾出现"只有 Y 和 S"）：
-            // 先别急着展示残缺条，等一小拍重查，拿到完整清单再显示
+            // 先别急着展示残缺条，等一小拍重查，拿到完整清单再显示。
+            // ⚠️ 重试间隔必须远小于"用户一次滑动的时长"：早期是 700ms×4，开机后第一次呼出
+            // 常常等不到清单就绪就被松手作废 —— 表现就是"只有震动、界面不出来"。
             activateRetries++
-            XLog.i("应用清单尚未就绪，延迟重试 ${activateRetries}/4")
-            handler.postDelayed({ if (state == State.ACTIVE) activateOverlay(y) }, 700L)
+            XLog.i("应用清单尚未就绪，延迟重试 ${activateRetries}/8")
+            handler.postDelayed({ if (state == State.ACTIVE) activateOverlay(y) }, 200L)
             return
         }
         activateRetries = 0
