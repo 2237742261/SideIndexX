@@ -108,6 +108,7 @@ object PrefStore {
         XLog.i("配置初始化检查：私有项=${existing.all.size}")
         if (existing.all.isNotEmpty()) {
             makeReadable(ctx)
+            ensureSecureChannel(ctx)
             return
         }
         // 私有 SP 为空 = 数据被清除过（或首次安装）。Settings.Secure 里若还留着旧配置，
@@ -136,10 +137,29 @@ object PrefStore {
             e.putInt(PrefKeys.GRID_COLUMNS, d.gridColumns)
             e.putBoolean(PrefKeys.LOG_VERBOSE, d.logVerbose)
         }
+        // write() 里「没有实际改动就不写 Secure」的保护让这条路径也写不进 Secure（base 就是刚铺的默认值）
+        ensureSecureChannel(ctx)
+    }
+
+    /**
+     * 确保 Settings.Secure 里有配置（1.32.2）。
+     *
+     * Secure 是 SystemUI 侧唯一「不依赖模块 App 进程」的通道：它空着的时候，重启后模块
+     * 只能去问 ContentProvider（App 进程没起来就失败），表现就是「必须手动点开一次
+     * 模块设置页才有索引」。而 write() 有「没有实际改动就不写 Secure」的保护 ——
+     * 从没改过设置的用户永远等不到那一次写入，所以进设置页时补一次。
+     */
+    private fun ensureSecureChannel(ctx: Context) {
+        if (SecureConfigChannel.read(ctx) != null) return
+        val config = ModuleConfig.read(SharedPrefSource(prefs(ctx)), "settings")
+        if (SecureConfigChannel.write(ctx, config)) {
+            XLog.i("配置通道：Secure 为空，已补写当前配置（${config.summary()}）")
+        }
     }
 
     /**
      * 当前配置：Settings.Secure 是真源（SystemUI 侧只读它；卸载重装、应用数据被隔离都不影响它），
+
      * 读不到才回退到应用私有 SharedPreferences。这样设置页显示的就是实际生效的值。
      */
     fun currentConfig(ctx: Context): ModuleConfig =

@@ -2,6 +2,7 @@ package com.eta.sideindexx.config
 
 import android.content.Context
 import android.net.Uri
+import android.provider.Settings
 import com.eta.sideindexx.Const
 import com.eta.sideindexx.util.XLog
 import java.io.File
@@ -29,6 +30,7 @@ object ConfigReader {
     @Volatile private var configAvailable = false
     @Volatile private var appContext: Context? = null
     @Volatile private var lastProviderAt = 0L
+    @Volatile private var secureHealed = false
     private var initialized = false
 
     fun attach(context: Context?) {
@@ -88,22 +90,52 @@ object ConfigReader {
             }
         }
 
-        readViaProvider()?.let { return it }
+        // 1.32.2：Secure 为空时，靠 provider / 直读 XML 拿到的配置要顺手写回 Secure，
+        // 否则「重启后必须点开一次模块 App」会复发（provider 依赖 App 进程，XML 被 SELinux 拦）
+        readViaProvider()?.let {
+            appContext?.let { ctx -> healSecure(ctx, it) }
+            return it
+        }
 
         val d = direct
         if (d != null && d.exists()) {
             val map = d.read()
             if (map != null) {
+                val fromXml = ModuleConfig.read(MapPrefSource(map), "direct-xml")
                 lastSource = "direct-xml"
                 configAvailable = true
-                return ModuleConfig.read(MapPrefSource(map), lastSource)
+                appContext?.let { ctx -> healSecure(ctx, fromXml) }
+                return fromXml
             }
         }
         if (!configAvailable) lastSource = "none"
         return null
     }
 
+    /**
+     * 配置通道自愈（1.32.2）：SystemUI 侧读到配置后把 Settings.Secure 补上。
+     *
+     * 为什么需要：`eta_sideindex_config` 是 SystemUI 里唯一不依赖模块 App 进程的通道，
+     * 但设置页只在「用户真的改了某一项」时才写它 —— 从没改过设置的用户 Secure 一直是空的，
+     * 重启后 SystemUI 只能去问 provider（App 进程没起来就失败），表现就是
+     * 「必须手动点开一次模块 App 才有索引」。SystemUI 持有 WRITE_SECURE_SETTINGS，
+     * 这里直接写，不碰 su。
+     */
+    private fun healSecure(ctx: Context, config: ModuleConfig) {
+        if (secureHealed) return
+        val payload = ConfigCodec.encode(config)
+        if (payload.isEmpty()) return
+        try {
+            Settings.Secure.putString(ctx.contentResolver, SecureConfigChannel.KEY, payload)
+            secureHealed = true
+            XLog.i("配置通道自愈：已把配置写回 Settings.Secure（${payload.length} 字节）")
+        } catch (t: Throwable) {
+            XLog.d("配置通道自愈失败：${t.javaClass.simpleName}")
+        }
+    }
+
     private fun readViaProvider(): ModuleConfig? {
+
         val ctx = appContext ?: return null
         val now = System.currentTimeMillis()
         if (now - lastProviderAt < PROVIDER_MIN_INTERVAL_MS) return null

@@ -6,7 +6,7 @@ ColorOS 17 上的边缘侧滑字母索引：屏幕边缘竖滑呼出索引条，
 
 APK 在 Releases 里：<https://github.com/2237742261/SideIndexX/releases/latest>
 
-当前版本 **1.32.1**（约 120 KB），已迁移到 **libxposed 新版 API（API 102）**。
+当前版本 **1.32.2**（约 120 KB），已迁移到 **libxposed 新版 API（API 102）**。
 安装后到 LSPosed 里启用模块（作用域已固定在「系统界面」，不用手动勾），然后重启系统界面。
 
 > ⚠️ 需要 **LSPosed 2.x**（提供 libxposed API 102，实测 2.2.1 可用）。
@@ -71,7 +71,11 @@ kill -9 $(pidof com.android.systemui)
 
 ## 更新日志
 
+**1.32.2**
+- 修「重启后必须手动点开一次模块 App 才能呼出索引」：配置通道（`Settings.Secure`）为空时，模块现在会自己把配置写回 Secure；设置页打开时也会补写一次。此前从没改过设置的用户 Secure 里一直是空的，重启后只能靠 ContentProvider（依赖模块 App 进程，进程没起来就失败）拿配置，所以必须先手动点开一次。
+
 **1.32.1**
+
 - LSPosed 里的模块卡片说明精简为「屏幕边缘上下滑动呼出字母索引」（原来是一长段功能罗列）。
 
 **1.32.0**
