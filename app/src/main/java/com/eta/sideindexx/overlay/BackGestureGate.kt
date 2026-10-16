@@ -1,5 +1,7 @@
 package com.eta.sideindexx.overlay
 
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Rect
 import android.view.InputEvent
 import android.view.MotionEvent
@@ -7,6 +9,7 @@ import com.eta.sideindexx.util.XLog
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import kotlin.math.abs
 
 /**
  * 感应带区域的触摸来源（1.31.0 起）+ 控制中心屏蔽（1.31.2 起）。
@@ -31,6 +34,24 @@ import de.robv.android.xposed.XposedHelpers
  */
 object BackGestureGate {
 
+    /**
+     * 判定「向下滑」的最小位移（px）。超过就认为用户想下拉控制中心，
+     * 于是抢指针把它拦掉。取 8px 是「看得出方向、又不至于太晚」的折中：
+     * 太晚（比如 30px）控制中心已经开始跟手，拦下来观感是「拉到一半又缩回去」。
+     */
+    private const val SHADE_PILFER_SLOP_PX = 8f
+
+    /** 主线程 handler：抢指针必须回主线程做，见下面 MOVE 分支的注释。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 一根已经接管的带内手势被旁听侧丢弃时的回调（1.31.23）。
+     *
+     * 必须通知控制器：否则它还在等 UP，状态机会永久卡在 ACTIVE —— 浮层挂在屏幕上、
+     * 点不到、也收不起来，而触摸全落到后面的应用（用户实测就是这个现象）。
+     */
+     var onGestureDropped: (() -> Unit)? = null
+
     /** 感应带在屏幕坐标系里的范围（左右各一条，由 OverlayController 更新） */
     @Volatile private var bandRight: Rect? = null
     @Volatile private var bandLeft: Rect? = null
@@ -38,8 +59,27 @@ object BackGestureGate {
     /** 是否要把感应带内的手势转给模块（= 模块要不要接管这次呼出判定） */
     @Volatile private var active = false
 
+    /**
+     * 前台是不是桌面（由控制器在心跳/即时判定里同步）。
+     *
+     * 只给「触发区内下滑拦控制中心」用：桌面下拉走的是桌面自己那条链路，
+     * 而应用内下拉是 SystemUI 的事（已有 CommandQueue 拦截）。
+     * 全局模式下 [active] 到处为 true，不加这个守卫会把应用内的下滑一起抢掉。
+     */
+    @Volatile private var onDesktop = false
+
     /** 触摸回调：(事件, 是否右侧) -> Unit。由 OverlayController 装 */
     @Volatile var onTouch: ((MotionEvent, Boolean) -> Unit)? = null
+
+    /**
+     * 手指落在感应带内、但 [active] 还是心跳给的旧值时，问一次控制器「现在该不该接管」。
+     * 控制器会同步刷新前台判定并回写 [active]（见 OverlayController.probeTakeoverNow）。
+     *
+     * 为什么需要：`active` 只由心跳更新，而心跳是 2.5 秒一拍 —— 从应用回到桌面后最长
+     * 2.5 秒里它还是 false，这一根手势会被下面的 DOWN 分支直接丢掉。用户表现为
+     * 「点开图片回桌面立刻侧滑呼不出索引」，偶发（取决于心跳相位）。
+     */
+    @Volatile var onDownProbe: (() -> Unit)? = null
 
     private var installed = false
     private val seenReceivers = HashSet<String>()
@@ -50,6 +90,14 @@ object BackGestureGate {
 
     /** 感应带内是否有手势正在进行（屏蔽控制中心的判据） */
     @Volatile private var bandGestureActive = false
+
+    /**
+     * 本根带内手势的起点。用于在「桌面触发区快速下滑」时尽早抢指针，
+     * 阻断桌面继续把这根手势解释成控制中心下拉；触发区外不受影响。
+     */
+    private var bandDownX = 0f
+    private var bandDownY = 0f
+    private var shadePilfered = false
 
     /** 上一次处理过的事件指纹：SystemUI 里有两个手势监视器，同一个事件会被各送一遍 */
     private var lastEventKey = ""
@@ -68,6 +116,21 @@ object BackGestureGate {
     fun update(right: Rect?, left: Rect?, on: Boolean) {
         bandRight = right
         bandLeft = left
+        setActive(on)
+    }
+
+    /** 同步「现在是不是桌面」。触发区内下滑拦控制中心要用（见 onDesktop）。 */
+    fun setOnDesktop(value: Boolean) {
+        onDesktop = value
+    }
+
+    /**
+     * 只更新「要不要接管」，不动感应带范围。
+     *
+     * 给手势路径上的**即时判定**用（见 [onDownProbe]）：[active] 平时只由心跳更新，
+     * 心跳是 2.5 秒一拍，从应用回到桌面后最长 2.5 秒里它还是 false。
+     */
+    fun setActive(on: Boolean) {
         active = on
         if (!on) {
             trackingSide = 0
@@ -232,20 +295,92 @@ object BackGestureGate {
                         if (key == lastEventKey) return
                         lastEventKey = key
                         // 只旁听、不改写返回值 —— 吞事件会让窗口彻底收不到这根手指
-                        if (!active) {
-                            trackingSide = 0
-                            bandGestureActive = false
+
+                        // DOWN 单独走：先看手指落在哪；落在带内但 active 还是心跳给的旧值时，
+                        // 做一次即时判定（onDownProbe）。不这么做，「从应用回桌面后立刻侧滑」
+                        // 会因 active 陈旧而被整根丢掉 —— 心跳 2.5 秒一拍，实测偶发。
+                        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                            val side = sideOf(e.x, e.y)
+
+                            // 返回箭头正在显示 → 这根手指不给索引（1.31.17）。
+                            // 覆盖两个方向：
+                            //   ①刚呼出箭头、还没开始滑动 —— 别和返回手势抢；
+                            //   ②**把箭头慢慢推回去**的途中（不松手所以不触发返回）——
+                            //     那根向内滑动会被下面的呼出判定当成索引手势，误把索引弹出来。
+                            //     用户 2026-10-16 实测的场景。
+                            // 只在落带内时查（每个事件都反射太贵）。
+                            if (side != 0) {
+                                val arrow = try {
+                                    BackGestureUi.isShowing()
+                                } catch (t: Throwable) {
+                                    false
+                                }
+                                if (arrow) {
+                                    trackingSide = 0
+                                    bandGestureActive = false
+                                    XLog.d("返回箭头显示中：本次手势不参与索引（DOWN 落在带内）")
+                                    return
+                                }
+                            }
+
+                            if (side != 0 && !active) {
+                                try {
+                                    onDownProbe?.invoke()
+                                } catch (t: Throwable) {
+                                    XLog.d("触摸旁听：即时判定失败 ${t.javaClass.simpleName}")
+                                }
+                            }
+                            trackingSide = if (active) side else 0
+                            bandGestureActive = trackingSide != 0
+                            bandDownX = e.x
+                            bandDownY = e.y
+                            shadePilfered = false
+                            if (trackingSide != 0) onTouch?.invoke(e, trackingSide == 1)
                             return
                         }
-                        when (e.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> {
-                                trackingSide = sideOf(e.x, e.y)
-                                bandGestureActive = trackingSide != 0
+
+                        if (!active) {
+                            val wasTracking = trackingSide != 0
+                            trackingSide = 0
+                            bandGestureActive = false
+                            if (wasTracking) {
+                                try {
+                                    onGestureDropped?.invoke()
+                                } catch (t: Throwable) {
+                                    XLog.d("触摸旁听：丢弃通知失败")
+                                }
                             }
+                            return
+                        }
+
+                        // 带内手势进行中：一旦判定为「向下滑」就抢指针。
+                        // 桌面下拉控制中心走的是桌面自己那条链路（不是 SystemUI 的 CommandQueue），
+                        // 只在呼出成立时才 pilfer 已经太晚 —— 控制中心已经跟手下拉了。
+                        // 这里在 MOVE 阶段尽早抢：桌面收到 cancel，就不会继续展开控制中心；
+                        // 触发区外的手势根本不进这里，桌面下拉照旧。
+                        if (trackingSide != 0 && !shadePilfered && onDesktop) {
+                            val dy = e.y - bandDownY
+                            val dx = e.x - bandDownX
+                            if (dy > 0f && abs(dy) > abs(dx) && abs(dy) > SHADE_PILFER_SLOP_PX) {
+                                shadePilfered = true
+                                // ⚠️ 绝不能在这条线程上直接 pilfer()：这是 SystemUI 的输入回调
+                                // 线程（"GestureUI"），抢指针要向 system_server 发请求，而它可能
+                                // 正等这次事件 finishInputEvent 结束 → 死锁。1.31.22 实测偶发
+                                // 「索引定格、点不到、却能操作后面的应用」= 输入通道卡死。
+                                // 挪到主线程只晚几毫秒，换来不卡死。
+                                mainHandler.post { pilfer() }
+                                XLog.d(
+                                    "触发区内下滑：抢指针拦控制中心 dy=${dy.toInt()} dx=${dx.toInt()}"
+                                )
+                            }
+                        }
+
+                        when (e.actionMasked) {
                             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                                 val side = trackingSide
                                 trackingSide = 0
                                 bandGestureActive = false
+                                shadePilfered = false
                                 if (side != 0) onTouch?.invoke(e, side == 1)
                                 return
                             }

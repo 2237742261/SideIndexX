@@ -34,3 +34,12 @@
 -keep class * extends android.content.BroadcastReceiver { *; }
 -keep class * implements android.content.ComponentCallbacks { *; }
 -keep class * extends de.robv.android.xposed.XC_MethodHook { *; }
+
+# ---- 模块内被 Xposed Hook 回调间接触达的单例（1.31.17）----
+# R8 从自家代码出发看不到调用点：BackGestureUi 只被 SystemUiHost 调一次 install()，
+# 之后 isShowing() 是被"框架回调里才读"的，收缩时会被判成不可达而删掉。
+# 表现：箭头判定静默失效（不报错、只是永远返回 false）。
+-keep class com.eta.sideindexx.overlay.BackGestureUi { *; }
+-keep class com.eta.sideindexx.overlay.BackGestureGate { *; }
+-keep class com.eta.sideindexx.overlay.ForegroundApp { *; }
+-keep class com.eta.sideindexx.overlay.SystemUiHost { *; }

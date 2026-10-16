@@ -143,6 +143,13 @@ class OverlayController(
                 handler.postDelayed(this, TICK_MS)
                 return
             }
+            // 走到这里 state == IDLE。自愈：浮层还挂着但手势已经结束 —— 正常路径不会走到这，
+            // 兜「某个分支漏了 hide」「旁听侧丢了手势没通知」这类漏。手指还按着时 state != IDLE，
+            // 所以放在这条 else 路径上不会误收。
+            if (overlayVisible) {
+                XLog.w("浮层可见但手势已结束，收起（自愈）")
+                resetGesture("浮层可见但空闲")
+            }
             try {
                 val latest = configProvider()
                 if (latest != config) {
@@ -349,6 +356,21 @@ class OverlayController(
                 XLog.e("旁听事件拷贝失败", t)
             }
         }
+        // 手指落在感应带内时的即时接管判定（见 probeTakeoverNow）：
+        // 补救「心跳 2.5 秒一拍」导致回桌面后立刻侧滑被丢弃的问题。
+        // ⚠️ 这个回调跑在 "GestureUI" 线程上，只能做只读判定，绝不能碰视图。
+        BackGestureGate.onDownProbe = { probeTakeoverNow() }
+        // 旁听侧丢弃了已接管的手势（比如中途 active 变 false）→ 通知控制器收起。
+        // 不加这条，状态机会卡在 ACTIVE：浮层挂在屏幕上、点不到、也收不起来，
+        // 而触摸全落到后面的应用（用户 2026-10-16 实测的现象）。
+        BackGestureGate.onGestureDropped = {
+            handler.post {
+                if (state != State.IDLE) {
+                    XLog.w("旁听侧丢弃手势，收起浮层复位")
+                    resetGesture("旁听侧丢弃手势")
+                }
+            }
+        }
         ensureOverlayWindow()
         AppRepository.prewarm(context)
         syncStrips()
@@ -359,6 +381,7 @@ class OverlayController(
         running = false
         abortMirrorSwipe()
         BackGestureGate.onTouch = null
+        BackGestureGate.onDownProbe = null
         BackGestureGate.update(null, null, false)
         stopWatch()
         watchThread?.quitSafely()
@@ -526,6 +549,10 @@ class OverlayController(
         }
 
         lastEventAt = System.currentTimeMillis()
+
+        // 遮罩自愈（1.31.17）：每个事件都顺手比对一次（内部有节流）。
+        // 修的是「全局模式滑动途中遮罩变透明、之后一直透明」。
+        fixBackdropIfNeeded()
         gestureEventCount++
 
         when (event.actionMasked) {
@@ -566,13 +593,21 @@ class OverlayController(
                 if (abs(dy) > gestureMaxDy) gestureMaxDy = abs(dy)
                 if (abs(dx) > gestureMaxDx) gestureMaxDx = abs(dx)
                 val slop = activationDistancePx()
-
                 if (state == State.PENDING) {
+
                     // 全局呼出模式要求更"竖"的滑动才成立：给斜向的系统返回手势让路
                     // （全屏应用/游戏里右缘斜滑是返回，不收紧的话返回会被呼出判定抢走）
                     val straight = if (config.onlyLauncher || ForegroundApp.isLauncher(context)) 1f else 2f
                     when {
                         abs(dy) >= slop && abs(dy) >= abs(dx) * straight -> {
+                            // 返回箭头正在显示 → 这根手指是"用户想返回又后悔、把箭头推回去"的那次
+                            // （1.31.23）。用户 2026-10-16 实测：推回去的途中手指上下抖一下，
+                            // 竖滑成立就把索引呼出来了。DOWN 时的检查盖不住这种"滑到一半箭头才出现"。
+                            if (BackGestureUi.isShowing()) {
+                                XLog.i("返回箭头显示中：放弃呼出索引，让给返回手势")
+                                resetGesture("返回箭头显示中")
+                                return true
+                            }
                             state = State.ACTIVE
                             XLog.i("滑动手势成立：dy=${dy.toInt()} dx=${dx.toInt()} slop=${slop.toInt()}")
                             activateOverlay(y)
@@ -954,6 +989,32 @@ class OverlayController(
     }
 
     /**
+     * 手指落在感应带内时的**即时**接管判定（由 BackGestureGate 在 "GestureUI" 线程上同步调用）。
+     *
+     * 为什么需要：`BackGestureGate.active` 只由心跳（[TICK_MS] = 2.5 秒）经
+     * [syncStripTouchability] 更新。从应用回到桌面后、下一次心跳到来之前它仍是 false，
+     * 那一根手势会被触摸旁听的 DOWN 分支直接丢掉 —— 用户表现为「点开图片回桌面立刻侧滑
+     * 呼不出索引」，且偶发（取决于心跳相位）。1.30.20 曾用「穿透看护」5Hz 轮询修过同一个
+     * 症状，1.31.0 改成触摸旁听后那段看护失效，问题复发。
+     *
+     * 这里只重算「要不要接管」并回写，不碰视图、不动感应带范围：
+     * 视图相关的 [syncStripTouchability] 仍然只在主线程的心跳里跑。
+     */
+    private fun probeTakeoverNow(): Boolean {
+        val onDesktop = try {
+            ForegroundApp.isLauncher(context)
+        } catch (t: Throwable) {
+            // 判定失败时宁可放行：代价只是多走一次 allowedHere（那里还会再判一次）
+            true
+        }
+        val want = !config.onlyLauncher || onDesktop
+        BackGestureGate.setOnDesktop(onDesktop)
+        BackGestureGate.setActive(want)
+        if (want) XLog.d("呼出接管：即时判定放行（补心跳的相位差）")
+        return want
+    }
+
+    /**
      * 仅桌面模式 + 前台不是桌面时，把感应带设成**触摸穿透**：
      * 应用里右缘的滑动（微信列表滚动条之类）与点击就完全不受影响，不需要透传兜底。
      * 桌面 / 全局模式下保持可触摸（要呼出索引）。
@@ -963,8 +1024,12 @@ class OverlayController(
         //   1. 告诉触摸旁听（BackGestureGate）感应带在屏幕上的范围；
         //   2. 告诉它要不要把带内手势转给模块做呼出判定 —— 口径同以前：
         //      仅桌面模式只在桌面接管，全局索引模式到处接管。
+        // 注意：这里是**心跳路径**（2.5 秒一拍），只负责把范围与接管状态收敛到稳定值；
+        // 心跳间隙里的即时判定由 [probeTakeoverNow] 在手指 DOWN 落带时补上。
         val onDesktop = ForegroundApp.isLauncher(context)
         val want = !config.onlyLauncher || onDesktop
+        // 同步「是不是桌面」：触发区内下滑拦控制中心要用（桌面下拉走桌面自己那条链路）
+        BackGestureGate.setOnDesktop(onDesktop)
         BackGestureGate.update(
             right = bandRect(true),
             left = bandRect(false),
@@ -1067,6 +1132,9 @@ class OverlayController(
             BlurredWallpaper.ensure(context, bounds.width(), bounds.height())
         }
         view.visibility = View.VISIBLE
+        // ⚠️ 这个字段以前**从来没有被赋成 true**（只有初始化和 hideOverlay 里的 false），
+        // 结果两处判断都恒真，R8 也能据此把它当常量折叠掉（1.31.23 才发现）。
+        overlayVisible = true
         view.prepare(
             loaded, AppRepository.groups(), config, fromRight,
             Display.isLandscape(context, windowManager)
@@ -1113,7 +1181,8 @@ class OverlayController(
      * 背景模式落到浮层窗口上：
      *  - 沉浸模式（immersive）：呼出背景 = 模糊桌面壁纸，浮层不需要系统模糊；
      *  - 非沉浸：不提取壁纸，给浮层开 FLAG_BLUR_BEHIND，系统直接把背后的真实内容模糊掉
-     *    （模糊半径 16dp，与旧版窗口模糊一致）。设备不支持跨窗口模糊时自动退回纯遮罩。
+     *    （模糊半径 16dp，与旧版窗口模糊一致）。
+     *    设备不支持跨窗口模糊时自动退回纯遮罩。
      * 配置热更新 / 窗口重建都会走到这里；手势进行中心跳会提前 return，不会中途改 flag。
      */
     private fun applyBackgroundMode(view: IndexOverlayView) {
@@ -1231,6 +1300,30 @@ class OverlayController(
         return Display.dp(context, base.toInt().coerceAtLeast(2)).toFloat()
     }
 
+    private var lastBackdropFixAt = 0L
+
+    /**
+     * 遮罩自愈（1.31.17）：颜色不是 0x66000000 就补回去。
+     *
+     * 修的是群友反馈的「全局模式滑动途中遮罩变透明、之后一直透明」。
+     * 代码里没有把 scrim 改成透明的路径（只在 addView 与 prepare() 赋值），
+     * 只能是被系统回收了 RenderNode 背景 —— 跨窗口模糊 + 长时间动画叠加时偶发、不可复现。
+     * 所以按节流主动比对；getBackgroundColor 是本地字段读取，不碰 binder。
+     * 自愈失败绝不能影响手势：异常吞掉，下一次再试。
+     */
+    private fun fixBackdropIfNeeded() {
+        val now = System.currentTimeMillis()
+        if (now - lastBackdropFixAt < BACKDROP_FIX_INTERVAL_MS) return
+        lastBackdropFixAt = now
+        val view = overlay ?: return
+        try {
+            if (view.ensureBackdrop()) {
+                XLog.w("遮罩被改成透明，已补回（自愈）")
+            }
+        } catch (t: Throwable) {
+        }
+    }
+
     private var lastSelfCheckAt = 0L
 
     /**
@@ -1263,6 +1356,9 @@ class OverlayController(
 
     private companion object {
         const val TICK_MS = 2500L
+
+        /** 遮罩自愈的最小间隔（ms）。手势每帧都会走，必须节流。 */
+        const val BACKDROP_FIX_INTERVAL_MS = 300L
 
         /**
          * 「穿透看护」轮询间隔。

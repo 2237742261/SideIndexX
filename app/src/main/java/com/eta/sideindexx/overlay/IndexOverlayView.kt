@@ -45,6 +45,21 @@ private const val GRID_MIN_INTERVAL_MS = 45L
  */
 private const val GROUP_SWITCH_HYSTERESIS = 0.8f
 
+/** 遮罩色：黑色 40% 压暗（统一白字，不跟深浅模式联动）。 */
+private const val SCRIM_COLOR = 0x66000000.toInt()
+
+/**
+ * 网格/气泡组距屏幕边缘的额外内缩（dp），叠在字母条宽度之外。
+ *
+ * 2026-10-16：用户反馈「慢慢上下滑选字母时手指会不小心落到应用图标上，松手就直接
+ * 把那个应用打开了」—— 图标离字母条太近。这里 6dp → 14dp（+8dp）。
+ * 左右两侧、横竖屏共用同一个值，保证镜像对称。
+ *
+ * ⚠️ 三处必须一起用这个常量，漏一处就会错位：
+ * [gridMetrics] 的宽度预算、[alignCard] 的卡片边距、[placeBubbleGroup] 的 iconCx。
+ */
+private const val GRID_EDGE_INSET_DP = 14
+
 class IndexOverlayView(context: Context) : FrameLayout(context) {
 
     var onLaunch: ((LaunchableApp) -> Unit)? = null
@@ -95,9 +110,10 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         addView(bg, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         scrim = View(context).apply {
-            setBackgroundColor(0x66000000)  // 黑色遮罩（统一白字，不再跟深浅模式联动）
+            setBackgroundColor(SCRIM_COLOR)  // 黑色遮罩（统一白字，不再跟深浅模式联动）
         }
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
 
         card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -134,6 +150,26 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         addView(bar, LayoutParams(LayoutParams.WRAP_CONTENT, dp(600)).apply { gravity = Gravity.TOP or Gravity.END })
     }
 
+    /**
+     * 遮罩自愈（1.31.17）。
+     *
+     * 有群友反馈：全局模式下滑着滑着遮罩变透明了，之后整根手势都没遮罩。
+     * 代码里没有任何路径会把 scrim 背景改成透明（只在 init 与 prepare() 两处赋值），
+     * 所以只能是被系统回收了 RenderNode 背景 —— 跨窗口模糊 + 长时间动画叠加时偶发、不可复现。
+     *
+     * 手势过程中由 OverlayController.fixBackdropIfNeeded() 不定期比对一次，颜色不对就补回来
+     * （节流见 OverlayController.BACKDROP_FIX_INTERVAL_MS）。
+     * getBackgroundColor 是本地字段读取、不碰 binder，比手势路径上任何 ATMS 调用都便宜。
+     *
+     * @return 是否真的补了一次（仅供日志）
+     */
+    fun ensureBackdrop(): Boolean {
+        val dr = scrim.background as? android.graphics.drawable.ColorDrawable
+        if (dr?.color == SCRIM_COLOR) return false
+        scrim.setBackgroundColor(SCRIM_COLOR)
+        return true
+    }
+
     fun prepare(
         apps: List<LaunchableApp>,
         groups: List<IndexGroup>,
@@ -142,6 +178,7 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         landscape: Boolean
     ) {
         config = newConfig
+        scrim.setBackgroundColor(SCRIM_COLOR)  // 每次呼出都把遮罩补回来（1.31.17：见 ensureBackdrop）
         landscapeMode = landscape
         side = if (fromRight) Side.RIGHT else Side.LEFT
         this.apps = apps
@@ -455,7 +492,7 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         val icon = dp(ModuleConfig.FIXED_ICON_SIZE_DP)
         val columns = config.gridColumns.coerceIn(4, 5)
         val gapPx = (ModuleConfig.FIXED_GRID_GAP_DP * resources.displayMetrics.density + 0.5f).toInt()
-        val reserved = bar.style.viewWidthPx + dp(6) + dp(16)
+        val reserved = bar.style.viewWidthPx + dp(GRID_EDGE_INSET_DP) + dp(16)
         val available = (realScreenW() - reserved).coerceAtLeast(icon * 3)
         val pitch = (icon + gapPx).coerceAtMost(available / columns)
         return columns to pitch
@@ -506,7 +543,7 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         val barW = bar.style.viewWidthPx
         // 呼出侧那一列的图标中心：右侧 = 最右列，左侧 = 最左列（整体镜像）
         val nearEnd = side == Side.RIGHT
-        val iconCx = if (nearEnd) screenW - barW - dp(6) - pitch / 2f else barW + dp(6) + pitch / 2f
+        val iconCx = if (nearEnd) screenW - barW - dp(GRID_EDGE_INSET_DP) - pitch / 2f else barW + dp(GRID_EDGE_INSET_DP) + pitch / 2f
         // 横屏布局：整组（气泡/标题/应用名）放网格首行旁边（间隔 4dp），垂直居中于首行
         val bubbleMargin: Int
         val bubbleTop: Int
@@ -689,7 +726,7 @@ class IndexOverlayView(context: Context) : FrameLayout(context) {
         val top = (target - iconCenterInCard).toInt().coerceIn(lower, maxTop)
         // 左右边距只在第一次设置；上下定位改用 translationY（不触发整卡 requestLayout，大跨度滑动才跟得上）
         if (!cardSideSet) {
-            val offset = bar.style.viewWidthPx + dp(6)
+            val offset = bar.style.viewWidthPx + dp(GRID_EDGE_INSET_DP)
             (card.layoutParams as LayoutParams).let { lp ->
                 lp.gravity = Gravity.TOP or (if (side == Side.RIGHT) Gravity.END else Gravity.START)
                 lp.setMargins(

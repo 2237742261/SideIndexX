@@ -105,11 +105,11 @@ zipalign -f -p 4 "$OUT/app-unsigned.apk" "$OUT/app-aligned.apk"
 KS="$ROOT/release.keystore"
 if [ ! -f "$KS" ]; then
     keytool -genkeypair -keystore "$KS" -alias sideindex -keyalg RSA -keysize 2048 -validity 10000 \
-        -storepass sideindex -keypass sideindex -dname "CN=Eta SideIndex, O=Eta, C=CN"
+        -storepass sideindexx -keypass sideindexx -dname "CN=Eta SideIndex, O=Eta, C=CN"
 fi
 
 APK="$ROOT/$OUT_NAME-$VERSION_NAME.apk"
-apksigner sign --ks "$KS" --ks-pass pass:sideindex --key-pass pass:sideindex \
+apksigner sign --ks "$KS" --ks-pass pass:sideindexx --key-pass pass:sideindexx \
     --out "$APK" "$OUT/app-aligned.apk"
 apksigner verify --print-certs "$APK" | head -4
 echo "构建完成：$APK"
