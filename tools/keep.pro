@@ -20,8 +20,12 @@
 # 注解/泛型签名等属性：Kotlin 与 Xposed 都可能用到
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 
-# ---- LSPosed 入口 ----
--keep class com.eta.sideindexx.ModuleEntry { *; }
+# ---- LSPosed 入口（libxposed 新版 API，1.32.0 起）----
+# 入口类只被 META-INF/xposed/java_init.list 按类名引用、由框架实例化，
+# R8 从自家代码出发看不到调用点，不加 keep 会被整类删掉
+# （表现：模块完全不加载、没有任何日志）。
+-keep class * extends io.github.libxposed.api.XposedModule { *; }
+-keep class com.eta.sideindexx.EtaModule { *; }
 
 # ---- 清单里的组件 ----
 -keep class com.eta.sideindexx.settings.SettingsActivity { *; }
@@ -33,7 +37,7 @@
 -keep class * extends android.content.ContentObserver { *; }
 -keep class * extends android.content.BroadcastReceiver { *; }
 -keep class * implements android.content.ComponentCallbacks { *; }
--keep class * extends de.robv.android.xposed.XC_MethodHook { *; }
+
 
 # ---- 模块内被 Xposed Hook 回调间接触达的单例（1.31.17）----
 # R8 从自家代码出发看不到调用点：BackGestureUi 只被 SystemUiHost 调一次 install()，

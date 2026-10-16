@@ -1,11 +1,8 @@
 package com.eta.sideindexx.overlay
 
-import android.util.Log
 import android.view.View
+import com.eta.sideindexx.LxApi
 import com.eta.sideindexx.util.XLog
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -39,23 +36,17 @@ object BackGestureUi {
     fun install(cl: ClassLoader) {
         if (installed) return
         installed = true
-        val cls = XposedHelpers.findClassIfExists(SIDE_GESTURE_NAV_VIEW, cl) ?: run {
+        val cls = LxApi.findClass(SIDE_GESTURE_NAV_VIEW, cl) ?: run {
             XLog.d("返回箭头：SystemUI 里没有 $SIDE_GESTURE_NAV_VIEW")
             return
         }
-        try {
-            XposedBridge.hookAllConstructors(cls, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val v = param.thisObject as? View ?: return
-                    if (views.add(v)) {
-                        XLog.i("返回箭头：已抓到实例 ${v.javaClass.simpleName}")
-                    }
-                }
-            })
-            XLog.i("返回箭头：构造函数钩子已装上")
-        } catch (t: Throwable) {
-            XLog.d("返回箭头：钩构造失败 ${t.javaClass.simpleName}")
+        val n = LxApi.hookConstructorsAfter(cls) { instance ->
+            val v = instance as? View ?: return@hookConstructorsAfter
+            if (views.add(v)) {
+                XLog.i("返回箭头：已抓到实例 ${v.javaClass.simpleName}")
+            }
         }
+        if (n > 0) XLog.i("返回箭头：构造函数钩子已装上（$n 个）") else XLog.d("返回箭头：钩构造失败")
     }
 
     /** 箭头是否正在显示。只在需要时调用（每个事件都反射太贵）。 */
@@ -63,7 +54,7 @@ object BackGestureUi {
         for (v in views) {
             try {
                 if (v.visibility == View.VISIBLE && v.alpha > ALPHA_EPS) return true
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
             }
         }
         return false

@@ -89,8 +89,8 @@ data class ModuleConfig(
     val onlyLauncher: Boolean = true,
     /** 触发区内允许系统返回手势：true = 不排除系统边缘手势（横滑返回归系统，代价是竖滑呼出略慢） */
     val allowSystemBack: Boolean = true,
-    /** 触发带宽度（触摸可触发的横向范围，独立于字母条视觉宽度） */
-    val triggerWidthDp: Int = 18,
+    /** 触发带宽度（触摸可触发的横向范围，独立于字母条视觉宽度）：默认 20dp（1.32.0 起） */
+    val triggerWidthDp: Int = 20,
     /** 触发区中心在屏幕上的高度百分比（绝对位置，往上/往下挪） */
     val triggerPositionPercent: Int = 55,
     val sensitivity: Int = 50,
@@ -100,8 +100,8 @@ data class ModuleConfig(
     val barTextColor: Int = 0xFFE8EAED.toInt(),
     val barHighlightColor: Int = 0xFF3D7EFF.toInt(),
     val barFadeMs: Int = 180,
-    /** 可见字母条占屏幕高度百分比（越小越省力）：默认 58%，字母间隙更大更好点 */
-    val barHeightPercent: Int = 58,
+    /** 可见字母条（= 触发高度）占屏幕高度百分比（越小越省力）：默认 45%（1.32.0 起） */
+    val barHeightPercent: Int = 45,
     val vibrateEnabled: Boolean = true,
     /** 震动强度 0-100：0 = 完全不震动（替代原来的"启用震动"开关） */
     val vibrateStrength: Int = 45,
@@ -179,7 +179,7 @@ data class ModuleConfig(
                     ?: if (src.getBoolean(PrefKeys.BOTH_SIDES, false)) "both" else "right",
                 onlyLauncher = src.getBoolean(PrefKeys.ONLY_LAUNCHER, true),
                 allowSystemBack = src.getBoolean(PrefKeys.ALLOW_SYSTEM_BACK, true),
-                triggerWidthDp = src.getInt(PrefKeys.TRIGGER_WIDTH_DP, 18).coerceIn(0, 35),
+                triggerWidthDp = src.getInt(PrefKeys.TRIGGER_WIDTH_DP, 20).coerceIn(0, 35),
                 triggerPositionPercent = src.getInt(PrefKeys.TRIGGER_POSITION_PERCENT, 55).coerceIn(0, 100),
                 sensitivity = src.getInt(PrefKeys.SENSITIVITY, 50).coerceIn(0, 100),
                 barRadiusDp = FIXED_BAR_RADIUS_DP,
@@ -188,7 +188,8 @@ data class ModuleConfig(
                 barTextColor = src.getInt(PrefKeys.BAR_TEXT_COLOR, 0xFFE8EAED.toInt()),
                 barHighlightColor = src.getInt(PrefKeys.BAR_HIGHLIGHT_COLOR, 0xFF3D7EFF.toInt()),
                 barFadeMs = src.getInt(PrefKeys.BAR_FADE_MS, 180).coerceIn(0, 800),
-                barHeightPercent = src.getInt(PrefKeys.BAR_HEIGHT_PERCENT, 58).coerceIn(20, 100),
+                barHeightPercent = src.getInt(PrefKeys.BAR_HEIGHT_PERCENT, 45).coerceIn(20, 100),
+
                 vibrateEnabled = src.getBoolean(PrefKeys.VIBRATE_ENABLED, true),
                 vibrateStrength = src.getInt(PrefKeys.VIBRATE_STRENGTH, 45).coerceIn(0, 100),
                 vibratePerGroup = src.getBoolean(PrefKeys.VIBRATE_PER_GROUP, true),

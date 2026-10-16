@@ -4,7 +4,8 @@
 # 依赖（TOOLCHAIN 目录，默认 /workspace/toolchain）：
 #   sdk33/android-13/android.jar     Android SDK platform 33（Debian 自带的 aapt 读不了 API34+ 的新资源表）
 #   r8.jar                           com.android.tools:r8（内含 D8）
-#   xposed-api-82.jar                de.robv.android.xposed:api:82
+#   libxposed-api-102.jar            io.github.libxposed:api:102 里的 classes.jar（新版 API）
+#   annotation-1.9.1.jar             androidx.annotation（新版 API 编译期依赖）
 #   kotlin-compiler-embeddable-2.1.21.jar 及依赖 / kotlin-stdlib-2.1.21.jar
 # 系统包：default-jdk aapt apksigner zipalign zip unzip
 
@@ -28,12 +29,15 @@ ICON=${ICON:-ic_side_index}
 OUT_NAME=${OUT_NAME:-SideIndexX}
 
 ANDROID_JAR="$TC/sdk33/android-13/android.jar"
-XPOSED_JAR="$TC/xposed-api-82.jar"
+# libxposed 新版 API（io.github.libxposed:api:102）与它编译期需要的 androidx 注解
+# ⚠️ 1.32.0 起源码里**不允许**再出现 de.robv.android.xposed.*（旧 API），所以不再挂 xposed-api-82.jar
+LXPOSED_JAR="$TC/libxposed-api-102.jar"
+ANNOTATION_JAR="$TC/annotation-1.9.1.jar"
 R8_JAR="$TC/r8.jar"
 STDLIB_JAR="$TC/kotlin-stdlib-2.1.21.jar"
 KOTLIN_CP="$TC/kotlin-compiler-embeddable-2.1.21.jar:$STDLIB_JAR:$TC/kotlin-script-runtime-2.1.21.jar:$TC/kotlin-reflect-2.1.21.jar:$TC/kotlin-daemon-embeddable-2.1.21.jar:$TC/trove4j-1.0.20200330.jar:$TC/annotations-13.0.jar:$TC/kotlinx-coroutines-core-jvm-1.9.0.jar"
 
-for f in "$ANDROID_JAR" "$XPOSED_JAR" "$R8_JAR" "$STDLIB_JAR"; do
+for f in "$ANDROID_JAR" "$LXPOSED_JAR" "$ANNOTATION_JAR" "$R8_JAR" "$STDLIB_JAR"; do
     [ -f "$f" ] || { echo "缺少 $f"; exit 1; }
 done
 for c in java javac jar aapt apksigner zipalign zip unzip keytool; do
@@ -79,7 +83,7 @@ javac -nowarn -Xlint:-options --release 17 -cp "$ANDROID_JAR:$STDLIB_JAR" -d "$O
 echo "==> 编译 Kotlin"
 java -cp "$KOTLIN_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -jvm-target 17 -nowarn \
-    -classpath "$ANDROID_JAR:$STDLIB_JAR:$XPOSED_JAR:$OUT/classes" \
+    -classpath "$ANDROID_JAR:$STDLIB_JAR:$LXPOSED_JAR:$ANNOTATION_JAR:$OUT/classes" \
     -d "$OUT/classes" "$SRC/java"
 
 echo "==> 生成 classes.dex（合并 kotlin-stdlib，SHRINK=$SHRINK）"
@@ -88,7 +92,7 @@ if [ "$SHRINK" = "1" ]; then
     # R8：收缩（删掉用不到的 kotlin 标准库与自家死代码）+ 优化。
     # 入口与框架回调的 keep 规则在 tools/keep.pro，删规则前先读那里的注释。
     java -Xmx1500m -cp "$R8_JAR" com.android.tools.r8.R8 --release --min-api 31 \
-        --lib "$ANDROID_JAR" --lib "$XPOSED_JAR" \
+        --lib "$ANDROID_JAR" --lib "$LXPOSED_JAR" --lib "$ANNOTATION_JAR" \
         --pg-conf "$ROOT/tools/keep.pro" \
         --output "$OUT/dex" "$OUT/code.jar" "$STDLIB_JAR"
 else
@@ -100,6 +104,15 @@ ls -l "$OUT/dex/classes.dex"
 echo "==> 打包"
 cp "$OUT/app-res.apk" "$OUT/app-unsigned.apk"
 (cd "$OUT/dex" && zip -q -X "$OUT/app-unsigned.apk" classes.dex)
+
+# libxposed 新版 API 的模块描述符必须落在 APK 根的 META-INF/xposed/ 下，
+# aapt 只打 res/assets，所以这里手工塞进去（Gradle 构建时对应 src/main/resources/）
+if [ -d "$ROOT/xposed/META-INF/xposed" ]; then
+    echo "==> 注入 libxposed 描述符"
+    (cd "$ROOT/xposed" && zip -q -X "$OUT/app-unsigned.apk" \
+        META-INF/xposed/module.prop META-INF/xposed/java_init.list META-INF/xposed/scope.list)
+    unzip -l "$OUT/app-unsigned.apk" | grep 'META-INF/xposed' || true
+fi
 zipalign -f -p 4 "$OUT/app-unsigned.apk" "$OUT/app-aligned.apk"
 
 KS="$ROOT/release.keystore"

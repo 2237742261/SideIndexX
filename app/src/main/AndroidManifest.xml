@@ -10,6 +10,7 @@
 
     <application
         android:allowBackup="false"
+        android:description="@string/xposed_description"
         android:icon="@drawable/ic_side_index_flyme"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -37,11 +38,13 @@
             android:enabled="true"
             android:exported="true" />
 
-        <!-- ============ LSPosed 模块声明 ============ -->
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="@string/xposed_description" />
-        <meta-data android:name="xposedminversion" android:value="82" />
-        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
-        <meta-data android:name="xposedsharedprefs" android:value="true" />
+        <!-- ============ LSPosed 模块声明（libxposed 新版 API，1.32.0 起）============
+             模块元信息不再走 meta-data，而是 APK 根下的三个文件：
+               META-INF/xposed/module.prop      minApiVersion / targetApiVersion = 102 …
+               META-INF/xposed/java_init.list   入口类 com.eta.sideindexx.EtaModule
+               META-INF/xposed/scope.list       作用域 com.android.systemui
+             模块名取 android:label，描述取 android:description（都在 <application> 上）。
+             旧的 xposedmodule / xposedminversion / xposedscope / xposedsharedprefs 已全部去掉。 -->
+
     </application>
 </manifest>

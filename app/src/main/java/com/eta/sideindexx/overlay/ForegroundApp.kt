@@ -7,13 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import com.eta.sideindexx.util.XLog
-import de.robv.android.xposed.XposedHelpers
+import com.eta.sideindexx.LxApi
 
 /**
  * 前台应用判定（只用来判断"是不是在桌面"）。
  *
  * 主判据是 **ActivityTaskManager 的当前焦点任务** —— 系统里最直接、最实时的"谁在前面"，
- * 用 XposedHelpers 调用可以绕过隐藏 API 限制。
+ * 用 LxApi 调用可以绕过隐藏 API 限制。
  * 拿不到时才退回 UsageStats 的 MOVE_TO_FOREGROUND 事件流（它有延迟、也有盲区）。
  *
  * 走过的弯路（别回头）：
@@ -183,22 +183,22 @@ object ForegroundApp {
 
     /**
      * 顶层应用包名：ActivityTaskManager 的当前焦点任务。
-     * 隐藏 API 必须走 XposedHelpers，普通反射会被隐藏 API 限制拦掉。
+     * 隐藏 API 必须走 LxApi，普通反射会被隐藏 API 限制拦掉。
      */
     private fun atmTop(ctx: Context): String {
         return try {
-            val cl = XposedHelpers.findClassIfExists("android.app.ActivityTaskManager", ctx.classLoader)
+            val cl = LxApi.findClass("android.app.ActivityTaskManager", ctx.classLoader)
                 ?: return ""
-            val service = XposedHelpers.callStaticMethod(cl, "getService") ?: return ""
+            val service = LxApi.callStaticMethod(cl, "getService") ?: return ""
             val focused = try {
-                XposedHelpers.callMethod(service, "getFocusedRootTaskInfo")
+                LxApi.callMethod(service, "getFocusedRootTaskInfo")
             } catch (t: Throwable) {
                 XLog.d("getFocusedRootTaskInfo 失败：${t.javaClass.simpleName}")
                 null
             }
             readTopActivityPackage(focused)?.let { if (it.isNotEmpty()) return it }
             val tasks = try {
-                XposedHelpers.callMethod(service, "getTasks", 1) as? List<*>
+                LxApi.callMethod(service, "getTasks", 1) as? List<*>
             } catch (t: Throwable) {
                 XLog.d("getTasks 失败：${t.javaClass.simpleName}")
                 null
@@ -228,11 +228,11 @@ object ForegroundApp {
         val launcher = launcherPackage(ctx)
         if (launcher.isEmpty()) return false
         return try {
-            val cl = XposedHelpers.findClassIfExists("android.app.ActivityTaskManager", ctx.classLoader)
+            val cl = LxApi.findClass("android.app.ActivityTaskManager", ctx.classLoader)
                 ?: return false
-            val service = XposedHelpers.callStaticMethod(cl, "getService") ?: return false
+            val service = LxApi.callStaticMethod(cl, "getService") ?: return false
             val infos = try {
-                XposedHelpers.callMethod(service, "getAllRootTaskInfos") as? List<*>
+                LxApi.callMethod(service, "getAllRootTaskInfos") as? List<*>
             } catch (t: Throwable) {
                 XLog.d("桌面在场判定：getAllRootTaskInfos 不可用（${t.javaClass.simpleName}）")
                 null
@@ -248,7 +248,7 @@ object ForegroundApp {
                     val pkg = readTopActivityPackage(info) ?: "-"
                     if (pkg != launcher && !pkg.startsWith("$launcher:")) continue
                     val visible = try {
-                        XposedHelpers.getBooleanField(info, "visible")
+                        LxApi.getBooleanField(info, "visible")
                     } catch (t: Throwable) {
                         true
                     }
@@ -261,12 +261,12 @@ object ForegroundApp {
                 if (launcherVisible) return true
             }
             val focused = try {
-                XposedHelpers.callMethod(service, "getFocusedRootTaskInfo")
+                LxApi.callMethod(service, "getFocusedRootTaskInfo")
             } catch (t: Throwable) {
                 null
             }
             val focusedMode = try {
-                XposedHelpers.getIntField(focused, "windowingMode")
+                LxApi.getIntField(focused, "windowingMode")
             } catch (t: Throwable) {
                 WINDOWING_MODE_FULLSCREEN
             }
@@ -280,11 +280,11 @@ object ForegroundApp {
     private fun readTopActivityPackage(taskInfo: Any?): String? {
         if (taskInfo == null) return null
         val top = try {
-            XposedHelpers.getObjectField(taskInfo, "topActivity")
+            LxApi.getObjectField(taskInfo, "topActivity")
         } catch (t: Throwable) {
             null
         } ?: try {
-            XposedHelpers.getObjectField(taskInfo, "baseActivity")
+            LxApi.getObjectField(taskInfo, "baseActivity")
         } catch (t: Throwable) {
             null
         }
@@ -292,7 +292,7 @@ object ForegroundApp {
             null -> null
             is ComponentName -> top.packageName
             else -> try {
-                XposedHelpers.getObjectField(top, "packageName") as? String
+                LxApi.getObjectField(top, "packageName") as? String
             } catch (t: Throwable) {
                 null
             }

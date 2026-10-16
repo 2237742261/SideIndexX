@@ -6,7 +6,10 @@ ColorOS 上的边缘侧滑字母索引：屏幕边缘竖滑呼出索引条，按
 
 APK 在 Releases 里：<https://github.com/2237742261/SideIndexX/releases/latest>
 
-当前版本 **1.31.24**（约 117 KB），安装后到 LSPosed 里启用模块，作用域只勾 `com.android.systemui`，然后重启系统界面。
+当前版本 **1.32.0**（约 120 KB），已迁移到 **libxposed 新版 API（API 102）**。
+安装后到 LSPosed 里启用模块（作用域已固定在「系统界面」，不用手动勾），然后重启系统界面。
+
+> ⚠️ 需要 **LSPosed 2.x**（提供 libxposed API 102，实测 2.2.1 可用）。
 
 ## 功能
 
@@ -33,7 +36,8 @@ LSPosed 模块，作用域只挂 `com.android.systemui`：浮层跑在系统界�
 
 - `sdk33/android-13/android.jar`（API 33 platform）
 - `r8.jar`（com.android.tools:r8，内含 R8/D8）
-- `xposed-api-82.jar`
+- `libxposed-api-102.jar`（`io.github.libxposed:api:102` 的 `classes.jar`，新版 API）
+- `annotation-1.9.1.jar`（androidx.annotation，新版 API 的编译期依赖）
 - `kotlin-compiler-embeddable-2.1.21.jar` 及 `kotlin-stdlib-2.1.21.jar` 等依赖
 - 系统包：`default-jdk aapt apksigner zipalign zip unzip`
 
@@ -43,14 +47,19 @@ sh tools/build_apk.sh          # 默认 SHRINK=1：dex 走 R8 收缩（规则 to
 
 产物 `SideIndexX-<版本>.apk`，约 115KB（dex 73KB + WebP 图标 14KB）。
 
-## 安装
+## 安装（需要 Root）
+
+必须给模块 **WRITE_SECURE_SETTINGS** 权限（配置就存在 `Settings.Secure` 里），这一步只能靠 root 或 adb，
+所以**手机得先 root（KernelSU / Magisk），并且装了 LSPosed 2.x**。
 
 ```sh
-pm install -r SideIndexX-x.y.z.apk
-pm grant com.eta.sideindexx android.permission.WRITE_SECURE_SETTINGS
+# 1) 安装
+su -c pm install -r SideIndexX-x.y.z.apk
+# 2) 给权限（root 终端里跑，不用电脑）
+su -c pm grant com.eta.sideindexx android.permission.WRITE_SECURE_SETTINGS
 ```
 
-然后在 LSPosed 里启用模块、作用域勾选「系统界面」，最后重启系统界面生效：
+装完到 LSPosed 里启用模块（作用域已固定在「系统界面」，不用手动勾），最后重启系统界面生效：
 
 ```sh
 kill -9 $(pidof com.android.systemui)
@@ -62,7 +71,14 @@ kill -9 $(pidof com.android.systemui)
 
 ## 更新日志
 
+**1.32.0**
+- 迁移到 LSPosed 新版 libxposed API（`targetApiVersion=102`）：入口改由 `META-INF/xposed/java_init.list` 声明，模块元信息走 `META-INF/xposed/module.prop`，不再调用 `de.robv.android.xposed.*` 旧 API（旧 API 在新版框架下已被禁用）。
+- 模块描述符开启 `autoHotReload`：模块应用更新后自动热重载，不用手动重启系统界面。
+- 触发宽度默认值改为 **20dp**、触发高度默认值改为 **45%**（只影响新装；已有配置不动）。
+- 日志默认静默：只有每次进程启动的「模块加载完成」一行与错误行会输出，其余跟 `log_verbose` 开关；热路径日志改用惰性字符串，开关关闭时不拼字符串。
+
 **1.31.24**
+
 - 网格与气泡组再往屏幕里内缩 8dp（左右两侧、横竖屏统一）：慢慢上下滑选字母时手指不容易落到图标上、松手误开应用。
 
 **1.31.23**

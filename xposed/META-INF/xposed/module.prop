@@ -1,0 +1,10 @@
+# libxposed 新版 API 的模块描述符（Java Properties 格式）
+# 模块名取 android:label，描述取 android:description（清单里的 @string/xposed_description）
+minApiVersion=102
+targetApiVersion=102
+# 作用域固定在 scope.list（系统界面），不希望用户往里加应用
+staticScope=true
+# Hook 抛异常时"保护模式"：吞掉异常并照常放行原方法，绝不让系统界面崩
+exceptionMode=protective
+# 模块应用更新后自动热重载（API 102 特性），不用手动重启系统界面
+autoHotReload=true

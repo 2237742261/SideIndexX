@@ -4,15 +4,16 @@ import android.content.Context
 import android.net.Uri
 import com.eta.sideindexx.Const
 import com.eta.sideindexx.util.XLog
-import de.robv.android.xposed.XSharedPreferences
 import java.io.File
 
 /**
  * Hook 进程侧的配置读取，通道顺序：
  *   0) Settings.Secure（主通道，任何进程免权限，不依赖模块应用存活）
- *   1) XSharedPreferences（经典方式，部分 ROM 可用）
- *   2) 模块的 ContentProvider
- *   3) 直读 SharedPreferences XML
+ *   1) 模块的 ContentProvider
+ *   2) 直读 SharedPreferences XML
+ *
+ * ⚠️ 1.32.0 起去掉 XSharedPreferences：新版 API（targetApiVersion=102）禁止调用
+ *    de.robv.android.xposed.* ；而 Secure 通道本来就是主通道，实测一直可用。
  */
 object ConfigReader {
 
@@ -20,7 +21,6 @@ object ConfigReader {
     private const val FAILURE_WARN_INTERVAL_MS = 60_000L
     private const val PROVIDER_MIN_INTERVAL_MS = 1500L
 
-    @Volatile private var candidates: List<Pair<String, XSharedPreferences>> = emptyList()
     @Volatile private var direct: DirectPrefs? = null
     @Volatile private var cached: ModuleConfig = ModuleConfig()
     @Volatile private var lastReloadAt = 0L
@@ -69,7 +69,6 @@ object ConfigReader {
         synchronized(this) {
             if (initialized) return
             initialized = true
-            candidates = buildCandidates()
             direct = DirectPrefs(PrefFiles.modulePrefsFile())
             load()?.let {
                 cached = it
@@ -86,21 +85,6 @@ object ConfigReader {
                 lastSource = "secure"
                 configAvailable = true
                 return it
-            }
-        }
-
-        for ((label, prefs) in candidates) {
-            try {
-                prefs.reload()
-                val map = prefs.all
-                if (map != null && map.isNotEmpty()) {
-                    if (lastSource != label) XLog.i("配置来源：$label（${map.size} 项）")
-                    lastSource = label
-                    configAvailable = true
-                    return ModuleConfig.read(SharedPrefSource(prefs), label)
-                }
-            } catch (t: Throwable) {
-                XLog.d("读取失败 $label：${t.javaClass.simpleName}")
             }
         }
 
@@ -140,23 +124,5 @@ object ConfigReader {
         }
     }
 
-    private fun buildCandidates(): List<Pair<String, XSharedPreferences>> {
-        val cls = XSharedPreferences::class.java
-        val file: File = PrefFiles.modulePrefsFile()
-        val attempts = listOf<Pair<String, () -> XSharedPreferences>>(
-            "fileName" to { cls.getConstructor(String::class.java).newInstance(Const.PREFS_NAME) },
-            "packageName+fileName" to {
-                cls.getConstructor(String::class.java, String::class.java)
-                    .newInstance(Const.MODULE_PACKAGE, Const.PREFS_NAME)
-            },
-            "file" to { cls.getConstructor(File::class.java).newInstance(file) }
-        )
-        val result = ArrayList<Pair<String, XSharedPreferences>>(attempts.size)
-        for ((label, factory) in attempts) {
-            try { result.add(label to factory()) } catch (t: Throwable) {
-                XLog.d("XSharedPreferences 构造失败（$label）：${t.javaClass.simpleName}")
-            }
-        }
-        return result
-    }
 }
+

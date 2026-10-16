@@ -805,7 +805,7 @@ class OverlayController(
         val iim = inputManagerInterface() ?: return false
         val e = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
             .apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
-        val ok = de.robv.android.xposed.XposedHelpers
+        val ok = com.eta.sideindexx.LxApi
             .callMethod(iim, "injectInputEvent", e, 0) as? Boolean ?: false
         e.recycle()
         ok
@@ -818,10 +818,10 @@ class OverlayController(
 
     private fun inputManagerInterface(): Any? {
         iimCache?.let { return it }
-        val binder = de.robv.android.xposed.XposedHelpers.callStaticMethod(
+        val binder = com.eta.sideindexx.LxApi.callStaticMethod(
             Class.forName("android.os.ServiceManager"), "getService", "input"
         ) as? android.os.IBinder ?: return null
-        val iim = de.robv.android.xposed.XposedHelpers.callStaticMethod(
+        val iim = com.eta.sideindexx.LxApi.callStaticMethod(
             Class.forName("android.hardware.input.IInputManager\$Stub"), "asInterface", binder
         ) ?: return null
         iimCache = iim
@@ -889,13 +889,13 @@ class OverlayController(
      * `InputManager.getInstance()` 在新系统上已返回 null（踩过），所以直接用 binder 接口。
      */
     private fun injectTapViaInputManager(x: Float, y: Float): Boolean = try {
-        val binder = de.robv.android.xposed.XposedHelpers.callStaticMethod(
+        val binder = com.eta.sideindexx.LxApi.callStaticMethod(
             Class.forName("android.os.ServiceManager"), "getService", "input"
         ) as? android.os.IBinder ?: run {
             XLog.d("透传：拿不到 input 服务")
             return false
         }
-        val iim = de.robv.android.xposed.XposedHelpers.callStaticMethod(
+        val iim = com.eta.sideindexx.LxApi.callStaticMethod(
             Class.forName("android.hardware.input.IInputManager\$Stub"), "asInterface", binder
         ) ?: run {
             XLog.d("透传：IInputManager asInterface 失败")
@@ -906,9 +906,9 @@ class OverlayController(
             .apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
         val up = android.view.MotionEvent.obtain(now, now + 40L, android.view.MotionEvent.ACTION_UP, x, y, 0)
             .apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
-        val okDown = de.robv.android.xposed.XposedHelpers
+        val okDown = com.eta.sideindexx.LxApi
             .callMethod(iim, "injectInputEvent", down, 0) as? Boolean ?: false
-        val okUp = de.robv.android.xposed.XposedHelpers
+        val okUp = com.eta.sideindexx.LxApi
             .callMethod(iim, "injectInputEvent", up, 0) as? Boolean ?: false
         down.recycle()
         up.recycle()

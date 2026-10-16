@@ -5,10 +5,8 @@ import android.os.Looper
 import android.graphics.Rect
 import android.view.InputEvent
 import android.view.MotionEvent
+import com.eta.sideindexx.LxApi
 import com.eta.sideindexx.util.XLog
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 import kotlin.math.abs
 
 /**
@@ -156,34 +154,34 @@ object BackGestureGate {
     private fun pilferOn(m: Any, depth: Int) {
         for (n in listOf("pilferPointers", "pilfer")) {
             try {
-                XposedHelpers.callMethod(m, n)
-                XLog.d("呼出抢指针：${m.javaClass.simpleName}.$n() 成功")
+                LxApi.callMethod(m, n)
+                XLog.d { "呼出抢指针：${m.javaClass.simpleName}.$n() 成功" }
                 return
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
             }
         }
         if (depth < 2) {
             for (g in listOf("getInputMonitor", "getRealInputMonitor", "getMonitor")) {
                 try {
-                    val inner = XposedHelpers.callMethod(m, g) ?: continue
+                    val inner = LxApi.callMethod(m, g) ?: continue
                     if (inner !== m) {
                         pilferOn(inner, depth + 1)
                         return
                     }
-                } catch (t: Throwable) {
+                } catch (_: Throwable) {
                 }
             }
         }
-        XLog.d(
+        XLog.d {
             "呼出抢指针失败：${m.javaClass.name} 方法=" +
                 m.javaClass.methods.joinToString(",") { it.name }
-        )
+        }
     }
 
     // ---------------- 控制中心屏蔽 ----------------
 
     private fun hookShadeExpansion(cl: ClassLoader) {
-        val cls = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.CommandQueue", cl)
+        val cls = LxApi.findClass("com.android.systemui.statusbar.CommandQueue", cl)
         if (cls == null) {
             XLog.d("控制中心屏蔽：进程里没有 CommandQueue")
             return
@@ -195,54 +193,49 @@ object BackGestureGate {
             val canSkip = rt == java.lang.Void.TYPE || rt == java.lang.Boolean.TYPE
             val isExpand = m.name.contains("xpand")
             if (!isExpand && !canSkip) continue
-            try {
-                XposedBridge.hookMethod(m, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!bandGestureActive) return
-                        // 诊断：感应带内手势期间，CommandQueue 上到底被调了哪些方法（找控制中心那条路）
-                        XLog.d("控制中心屏蔽：手势期间 CommandQueue.${m.name} 被调用")
-                        if (isExpand && canSkip) {
-                            XLog.i("控制中心屏蔽：感应带内手势期间跳过 ${m.name}")
-                            param.result = if (rt == java.lang.Boolean.TYPE) false else null
-                        }
-                    }
-                })
+            val ok = LxApi.hookBefore(m) { scope ->
+                if (!bandGestureActive) return@hookBefore
+                // 诊断：感应带内手势期间，CommandQueue 上到底被调了哪些方法（找控制中心那条路）
+                XLog.d { "控制中心屏蔽：手势期间 CommandQueue.${m.name} 被调用" }
+                if (isExpand && canSkip) {
+                    XLog.i { "控制中心屏蔽：感应带内手势期间跳过 ${m.name}" }
+                    scope.setResult(if (rt == java.lang.Boolean.TYPE) false else null)
+                }
+            }
+            if (ok) {
                 n++
                 if (isExpand) expand++
-            } catch (t: Throwable) {
-                XLog.d("控制中心屏蔽：钩 ${m.name} 失败 ${t.javaClass.simpleName}")
+            } else {
+                XLog.d { "控制中心屏蔽：钩 ${m.name} 失败" }
             }
         }
-        XLog.i("控制中心屏蔽：CommandQueue 钩住 $n 个入口（其中展开 $expand 个）")
+        XLog.i { "控制中心屏蔽：CommandQueue 钩住 $n 个入口（其中展开 $expand 个）" }
     }
 
     // ---------------- 触摸旁听 ----------------
 
     private fun hookReceivers(cl: ClassLoader) {
-        val base = XposedHelpers.findClassIfExists("android.view.InputEventReceiver", cl)
+        val base = LxApi.findClass("android.view.InputEventReceiver", cl)
         if (base == null) {
             XLog.d("触摸旁听：进程里没有 InputEventReceiver")
             return
         }
-        try {
-            XposedBridge.hookAllConstructors(base, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        onReceiverCreated(param.thisObject ?: return)
-                    } catch (t: Throwable) {
-                        XLog.d("触摸旁听：处理接收器失败 ${t.javaClass.simpleName}")
-                    }
-                }
-            })
-            XLog.i("触摸旁听：已开始监听输入接收器")
-        } catch (t: Throwable) {
-            XLog.d("触摸旁听：钩 InputEventReceiver 构造失败 ${t.javaClass.simpleName}")
+        val n = LxApi.hookConstructorsAfter(base) { obj ->
+            try {
+                onReceiverCreated(obj)
+            } catch (_: Throwable) {
+            }
+        }
+        if (n > 0) {
+            XLog.i { "触摸旁听：已开始监听输入接收器（$n 个构造）" }
+        } else {
+            XLog.d("触摸旁听：钩 InputEventReceiver 构造失败")
         }
     }
 
     private fun onReceiverCreated(obj: Any) {
         val cn = obj.javaClass.name
-        if (seenReceivers.add(cn)) XLog.d("触摸旁听：输入接收器 $cn")
+        if (seenReceivers.add(cn)) XLog.d { "触摸旁听：输入接收器 $cn" }
         if (!cn.contains("InputChannelCompat")) return
         findListener(obj)?.let { hookListener(it, cn) }
     }
@@ -260,7 +253,7 @@ object BackGestureGate {
                         val v = f.get(obj) ?: continue
                         val vc = v.javaClass.name
                         if (vc.startsWith("com.android") || vc.startsWith("com.oplus")) {
-                            XLog.d("触摸旁听：$label 的监听器 = $vc")
+                            XLog.d { "触摸旁听：$label 的监听器 = $vc" }
                             return v
                         }
                     } catch (t: Throwable) {
@@ -269,8 +262,7 @@ object BackGestureGate {
                 cls = cls.superclass
                 depth++
             }
-        } catch (t: Throwable) {
-            XLog.d("触摸旁听：找监听器失败 ${t.javaClass.simpleName}")
+        } catch (_: Throwable) {
         }
         return null
     }
@@ -284,117 +276,117 @@ object BackGestureGate {
             val paramOk = first == MotionEvent::class.java || first == InputEvent::class.java ||
                 (first == java.lang.Object::class.java && m.name == "invoke")
             if (!paramOk) continue
-            try {
-                XposedBridge.hookMethod(m, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val e = param.args.firstOrNull() as? MotionEvent ?: return
-                        // 同一个事件会被两个监视器各送一遍（实测一次手势打出两组"手势成立"）：
-                        // 按 downTime+action+坐标 去重，只处理第一份
-                        val key = e.downTime.toString() + ":" + e.actionMasked + ":" +
-                            e.x.toInt() + ":" + e.y.toInt()
-                        if (key == lastEventKey) return
-                        lastEventKey = key
-                        // 只旁听、不改写返回值 —— 吞事件会让窗口彻底收不到这根手指
+            val ok = LxApi.hookBefore(m) { scope ->
+                onListenerEvent(scope.chain.args.firstOrNull() as? MotionEvent)
+            }
+            if (ok) n++ else XLog.d { "触摸旁听：钩 ${m.name} 失败" }
+        }
+        if (n > 0) XLog.i { "触摸旁听：监听器 $lc（来自 $owner）钩住 $n 个入口" }
+        if (lc.contains("BackGesture")) findInputMonitor(listener)
+    }
 
-                        // DOWN 单独走：先看手指落在哪；落在带内但 active 还是心跳给的旧值时，
-                        // 做一次即时判定（onDownProbe）。不这么做，「从应用回桌面后立刻侧滑」
-                        // 会因 active 陈旧而被整根丢掉 —— 心跳 2.5 秒一拍，实测偶发。
-                        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
-                            val side = sideOf(e.x, e.y)
+    /**
+     * 旁听回调本体。
+     *
+     * ⚠️ 跑在 SystemUI 的 "GestureUI" 输入回调线程上：这里只能做本地、只读的事，
+     * 任何 binder（尤其 pilfer）都要 `mainHandler.post` 回主线程，否则输入通道会卡死（1.31.23）。
+     */
+    private fun onListenerEvent(e: MotionEvent?) {
+        if (e == null) return
+        // 同一个事件会被两个监视器各送一遍（实测一次手势打出两组"手势成立"）：
+        // 按 downTime+action+坐标 去重，只处理第一份
+        val key = e.downTime.toString() + ":" + e.actionMasked + ":" +
+            e.x.toInt() + ":" + e.y.toInt()
+        if (key == lastEventKey) return
+        lastEventKey = key
+        // 只旁听、不改写返回值 —— 吞事件会让窗口彻底收不到这根手指
 
-                            // 返回箭头正在显示 → 这根手指不给索引（1.31.17）。
-                            // 覆盖两个方向：
-                            //   ①刚呼出箭头、还没开始滑动 —— 别和返回手势抢；
-                            //   ②**把箭头慢慢推回去**的途中（不松手所以不触发返回）——
-                            //     那根向内滑动会被下面的呼出判定当成索引手势，误把索引弹出来。
-                            //     用户 2026-10-16 实测的场景。
-                            // 只在落带内时查（每个事件都反射太贵）。
-                            if (side != 0) {
-                                val arrow = try {
-                                    BackGestureUi.isShowing()
-                                } catch (t: Throwable) {
-                                    false
-                                }
-                                if (arrow) {
-                                    trackingSide = 0
-                                    bandGestureActive = false
-                                    XLog.d("返回箭头显示中：本次手势不参与索引（DOWN 落在带内）")
-                                    return
-                                }
-                            }
+        // DOWN 单独走：先看手指落在哪；落在带内但 active 还是心跳给的旧值时，
+        // 做一次即时判定（onDownProbe）。不这么做，「从应用回桌面后立刻侧滑」
+        // 会因 active 陈旧而被整根丢掉 —— 心跳 2.5 秒一拍，实测偶发。
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            val side = sideOf(e.x, e.y)
 
-                            if (side != 0 && !active) {
-                                try {
-                                    onDownProbe?.invoke()
-                                } catch (t: Throwable) {
-                                    XLog.d("触摸旁听：即时判定失败 ${t.javaClass.simpleName}")
-                                }
-                            }
-                            trackingSide = if (active) side else 0
-                            bandGestureActive = trackingSide != 0
-                            bandDownX = e.x
-                            bandDownY = e.y
-                            shadePilfered = false
-                            if (trackingSide != 0) onTouch?.invoke(e, trackingSide == 1)
-                            return
-                        }
+            // 返回箭头正在显示 → 这根手指不给索引（1.31.17）。
+            // 覆盖两个方向：
+            //   ①刚呼出箭头、还没开始滑动 —— 别和返回手势抢；
+            //   ②**把箭头慢慢推回去**的途中（不松手所以不触发返回）——
+            //     那根向内滑动会被下面的呼出判定当成索引手势，误把索引弹出来。
+            //     用户 2026-10-16 实测的场景。
+            // 只在落带内时查（每个事件都反射太贵）。
+            if (side != 0) {
+                val arrow = try {
+                    BackGestureUi.isShowing()
+                } catch (_: Throwable) {
+                    false
+                }
+                if (arrow) {
+                    trackingSide = 0
+                    bandGestureActive = false
+                    XLog.d("返回箭头显示中：本次手势不参与索引（DOWN 落在带内）")
+                    return
+                }
+            }
 
-                        if (!active) {
-                            val wasTracking = trackingSide != 0
-                            trackingSide = 0
-                            bandGestureActive = false
-                            if (wasTracking) {
-                                try {
-                                    onGestureDropped?.invoke()
-                                } catch (t: Throwable) {
-                                    XLog.d("触摸旁听：丢弃通知失败")
-                                }
-                            }
-                            return
-                        }
+            if (side != 0 && !active) {
+                try {
+                    onDownProbe?.invoke()
+                } catch (_: Throwable) {
+                }
+            }
+            trackingSide = if (active) side else 0
+            bandGestureActive = trackingSide != 0
+            bandDownX = e.x
+            bandDownY = e.y
+            shadePilfered = false
+            if (trackingSide != 0) onTouch?.invoke(e, trackingSide == 1)
+            return
+        }
 
-                        // 带内手势进行中：一旦判定为「向下滑」就抢指针。
-                        // 桌面下拉控制中心走的是桌面自己那条链路（不是 SystemUI 的 CommandQueue），
-                        // 只在呼出成立时才 pilfer 已经太晚 —— 控制中心已经跟手下拉了。
-                        // 这里在 MOVE 阶段尽早抢：桌面收到 cancel，就不会继续展开控制中心；
-                        // 触发区外的手势根本不进这里，桌面下拉照旧。
-                        if (trackingSide != 0 && !shadePilfered && onDesktop) {
-                            val dy = e.y - bandDownY
-                            val dx = e.x - bandDownX
-                            if (dy > 0f && abs(dy) > abs(dx) && abs(dy) > SHADE_PILFER_SLOP_PX) {
-                                shadePilfered = true
-                                // ⚠️ 绝不能在这条线程上直接 pilfer()：这是 SystemUI 的输入回调
-                                // 线程（"GestureUI"），抢指针要向 system_server 发请求，而它可能
-                                // 正等这次事件 finishInputEvent 结束 → 死锁。1.31.22 实测偶发
-                                // 「索引定格、点不到、却能操作后面的应用」= 输入通道卡死。
-                                // 挪到主线程只晚几毫秒，换来不卡死。
-                                mainHandler.post { pilfer() }
-                                XLog.d(
-                                    "触发区内下滑：抢指针拦控制中心 dy=${dy.toInt()} dx=${dx.toInt()}"
-                                )
-                            }
-                        }
+        if (!active) {
+            val wasTracking = trackingSide != 0
+            trackingSide = 0
+            bandGestureActive = false
+            if (wasTracking) {
+                try {
+                    onGestureDropped?.invoke()
+                } catch (_: Throwable) {
+                }
+            }
+            return
+        }
 
-                        when (e.actionMasked) {
-                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                                val side = trackingSide
-                                trackingSide = 0
-                                bandGestureActive = false
-                                shadePilfered = false
-                                if (side != 0) onTouch?.invoke(e, side == 1)
-                                return
-                            }
-                        }
-                        if (trackingSide != 0) onTouch?.invoke(e, trackingSide == 1)
-                    }
-                })
-                n++
-            } catch (t: Throwable) {
-                XLog.d("触摸旁听：钩 ${m.name} 失败 ${t.javaClass.simpleName}")
+        // 带内手势进行中：一旦判定为「向下滑」就抢指针。
+        // 桌面下拉控制中心走的是桌面自己那条链路（不是 SystemUI 的 CommandQueue），
+        // 只在呼出成立时才 pilfer 已经太晚 —— 控制中心已经跟手下拉了。
+        // 这里在 MOVE 阶段尽早抢：桌面收到 cancel，就不会继续展开控制中心；
+        // 触发区外的手势根本不进这里，桌面下拉照旧。
+        if (trackingSide != 0 && !shadePilfered && onDesktop) {
+            val dy = e.y - bandDownY
+            val dx = e.x - bandDownX
+            if (dy > 0f && abs(dy) > abs(dx) && abs(dy) > SHADE_PILFER_SLOP_PX) {
+                shadePilfered = true
+                // ⚠️ 绝不能在这条线程上直接 pilfer()：这是 SystemUI 的输入回调
+                // 线程（"GestureUI"），抢指针要向 system_server 发请求，而它可能
+                // 正等这次事件 finishInputEvent 结束 → 死锁。1.31.22 实测偶发
+                // 「索引定格、点不到、却能操作后面的应用」= 输入通道卡死。
+                // 挪到主线程只晚几毫秒，换来不卡死。
+                mainHandler.post { pilfer() }
+                XLog.d { "触发区内下滑：抢指针拦控制中心 dy=${dy.toInt()} dx=${dx.toInt()}" }
             }
         }
-        if (n > 0) XLog.i("触摸旁听：监听器 $lc（来自 $owner）钩住 $n 个入口")
-        if (lc.contains("BackGesture")) findInputMonitor(listener)
+
+        when (e.actionMasked) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val side = trackingSide
+                trackingSide = 0
+                bandGestureActive = false
+                shadePilfered = false
+                if (side != 0) onTouch?.invoke(e, side == 1)
+                return
+            }
+        }
+        if (trackingSide != 0) onTouch?.invoke(e, trackingSide == 1)
     }
 
     /**
@@ -423,10 +415,11 @@ object BackGestureGate {
                             if (type.contains("InputMonitor")) {
                                 val v = f.get(obj) ?: continue
                                 if (!monitorCandidates.contains(v)) monitorCandidates.add(v)
-                                XLog.i(
-                                    "触摸旁听：候选监视器 ${cls.simpleName}.${f.name} → ${v.javaClass.simpleName} " +
+                                XLog.i {
+                                    "触摸旁听：候选监视器 ${cls?.simpleName}.${f.name} → ${v.javaClass.simpleName} " +
+
                                         "方法=" + v.javaClass.methods.joinToString(",") { it.name }
-                                )
+                                }
                                 // 包装对象里可能藏着真身，继续往下挖
                                 queue.add(v)
                                 continue
@@ -441,10 +434,10 @@ object BackGestureGate {
                     depth++
                 }
             }
-            XLog.d("触摸旁听：没找到 InputMonitor（扫了 $visited 个对象）")
-        } catch (t: Throwable) {
-            XLog.d("触摸旁听：找 InputMonitor 失败 ${t.javaClass.simpleName}")
+            XLog.d { "触摸旁听：没找到 InputMonitor（扫了 $visited 个对象）" }
+        } catch (_: Throwable) {
         }
+
     }
 
     /** 1 = 右侧带内，2 = 左侧带内，0 = 都不在 */
