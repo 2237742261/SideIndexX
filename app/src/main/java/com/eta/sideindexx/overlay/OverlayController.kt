@@ -600,7 +600,11 @@ class OverlayController(
 
                     // 全局呼出模式要求更"竖"的滑动才成立：给斜向的系统返回手势让路
                     // （全屏应用/游戏里右缘斜滑是返回，不收紧的话返回会被呼出判定抢走）
-                    val straight = if (config.onlyLauncher || ForegroundApp.isLauncher(context)) 1f else 2f
+                    val straight = if (config.onlyLauncher || ForegroundApp.isLauncher(context)) {
+                        STRAIGHT_LAUNCHER
+                    } else {
+                        STRAIGHT_APP
+                    }
                     when {
                         abs(dy) >= slop && abs(dy) >= abs(dx) * straight -> {
                             // 返回箭头正在显示 → 这根手指是"用户想返回又后悔、把箭头推回去"的那次
@@ -1301,8 +1305,12 @@ class OverlayController(
 
     private fun activationDistancePx(): Float {
         // 灵敏度越高，触发所需滑动距离越小（更跟手）
-        val base = 10f - (config.sensitivity.coerceIn(0, 100) / 100f) * 7f
-        return Display.dp(context, base.toInt().coerceAtLeast(2)).toFloat()
+        // 1.32.5：以 40dp 为基准，灵敏度只做 ±8dp 微调。
+        // 以前按灵敏度算出的是 3~10dp（≈18px）就成立 —— 手指稍微抖一下就算「滑动了」，
+        // 用户实测：不经意的返回手势有时会把索引弹出来，事后又很难复现（就是这种擦边判定）。
+        val sens = config.sensitivity.coerceIn(0, 100)
+        val dp = TRIGGER_DISTANCE_DP - (sens - 50) / 50f * TRIGGER_DISTANCE_RANGE_DP
+        return Display.dp(context, dp.toInt().coerceAtLeast(24)).toFloat()
     }
 
     private var lastBackdropFixAt = 0L
@@ -1361,6 +1369,31 @@ class OverlayController(
 
     private companion object {
         const val TICK_MS = 2500L
+
+        /**
+         * 呼出所需的最小竖直位移（dp），默认灵敏度下就是它（1.32.5）。
+         *
+         * 以前这个门槛由灵敏度直接算出来：`10 - sens*0.07` → 3~10dp（≈9~30px）。
+         * 也就是手指往下挪十几像素就算「滑动了」，判据擦边到经不起任何抖动：
+         * 用户实测「不经意的返回手势偶尔会把索引弹出来」，事后又难复现 —— 就是这种擦边判定。
+         * 抬到 40dp（≈120px @3x）后，一根横向为主的手势根本走不到这个位移。
+         */
+        const val TRIGGER_DISTANCE_DP = 40f
+
+        /** 灵敏度对触发距离的微调幅度（dp）：灵敏度 100 → -8dp，0 → +8dp。 */
+        const val TRIGGER_DISTANCE_RANGE_DP = 8f
+
+        /**
+         * 桌面模式的竖直度要求：|dy| >= |dx| * 1.5（1.32.5 起；以前是 1f）。
+         *
+         * 桌面判定本身会有误判（顶层是桌面 + 小窗/分屏时也按桌面处理），
+         * 所以这里不能再容忍「斜着滑」：横滑（桌面翻页 / 系统返回）必须完全走不掉。
+         */
+        const val STRAIGHT_LAUNCHER = 1.5f
+
+        /** 应用内的竖直度要求（给系统返回手势让路，沿用旧值）。 */
+        const val STRAIGHT_APP = 2f
+
 
         /** 遮罩自愈的最小间隔（ms）。手势每帧都会走，必须节流。 */
         const val BACKDROP_FIX_INTERVAL_MS = 300L

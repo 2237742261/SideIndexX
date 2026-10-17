@@ -31,6 +31,8 @@ object SystemUiHost {
             // 返回箭头状态读取（1.31.17）：钩 SideGestureNavView 构造拿实例，
             // 供触摸旁听判断「箭头显示中」时不给索引呼出。
             BackGestureUi.install(context.classLoader)
+            // 系统界面遮挡状态（1.32.4）：通知中心/控制中心展开、锁屏可见时不呼出索引。
+            SystemCover.install(context.classLoader)
             controller = OverlayController(
                 context = context,
                 windowManager = wm,

@@ -47,3 +47,7 @@
 -keep class com.eta.sideindexx.overlay.BackGestureGate { *; }
 -keep class com.eta.sideindexx.overlay.ForegroundApp { *; }
 -keep class com.eta.sideindexx.overlay.SystemUiHost { *; }
+
+# 系统遮挡状态（1.32.4）：只在钩 apply() 的回调里写 volatile 字段，触摸回调里读；
+# 别让 R8 把它当不可达删掉（删了表现是「通知栏/锁屏上照样弹索引」）。
+-keep class com.eta.sideindexx.overlay.SystemCover { *; }

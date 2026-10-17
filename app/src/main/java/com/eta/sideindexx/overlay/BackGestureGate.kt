@@ -315,6 +315,20 @@ object BackGestureGate {
             //     用户 2026-10-16 实测的场景。
             // 只在落带内时查（每个事件都反射太贵）。
             if (side != 0) {
+                // 系统界面自己盖在上面（1.32.4）：通知中心/控制中心展开、锁屏可见 → 不给索引。
+                // 这些界面上从边缘左右滑，以前会被判成索引呼出、把索引盖在它们上面。
+                // 只读本地字段，不碰 binder，可以在输入回调线程上直接调。
+                val covered = try {
+                    SystemCover.blockedReason()
+                } catch (_: Throwable) {
+                    null
+                }
+                if (covered != null) {
+                    trackingSide = 0
+                    bandGestureActive = false
+                    XLog.d { "系统遮挡（$covered）：本次手势不参与索引（DOWN 落在带内）" }
+                    return
+                }
                 val arrow = try {
                     BackGestureUi.isShowing()
                 } catch (_: Throwable) {
