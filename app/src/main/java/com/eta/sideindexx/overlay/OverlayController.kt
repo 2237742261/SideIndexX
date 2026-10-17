@@ -1084,6 +1084,11 @@ class OverlayController(
                 return false
             }
         }
+        // 横屏时暂停（1.32.6）：横屏下不响应侧滑，切回竖屏恢复
+        if (config.landscapePause && Display.isLandscape(context, windowManager)) {
+            XLog.d("横屏暂停：本次手势不呼出（横屏模式）")
+            return false
+        }
         // 应用黑名单：这些应用里不响应（静默放行，不刷日志）
         if (config.blacklist.isNotBlank() &&
             config.blacklist.split(',').map { it.trim() }.contains(foreground)
@@ -1306,10 +1311,11 @@ class OverlayController(
     private fun activationDistancePx(): Float {
         // 灵敏度越高，触发所需滑动距离越小（更跟手）
         // 1.32.5：以 40dp 为基准，灵敏度只做 ±8dp 微调。
-        // 以前按灵敏度算出的是 3~10dp（≈18px）就成立 —— 手指稍微抖一下就算「滑动了」，
-        // 用户实测：不经意的返回手势有时会把索引弹出来，事后又很难复现（就是这种擦边判定）。
+        // 1.32.7：竖屏基准抬到 45dp（防误触再收紧）；横屏保持 40dp 不动。
         val sens = config.sensitivity.coerceIn(0, 100)
-        val dp = TRIGGER_DISTANCE_DP - (sens - 50) / 50f * TRIGGER_DISTANCE_RANGE_DP
+        val base = if (Display.isLandscape(context, windowManager)) TRIGGER_DISTANCE_DP_LANDSCAPE
+                   else TRIGGER_DISTANCE_DP_PORTRAIT
+        val dp = base - (sens - 50) / 50f * TRIGGER_DISTANCE_RANGE_DP
         return Display.dp(context, dp.toInt().coerceAtLeast(24)).toFloat()
     }
 
@@ -1378,7 +1384,10 @@ class OverlayController(
          * 用户实测「不经意的返回手势偶尔会把索引弹出来」，事后又难复现 —— 就是这种擦边判定。
          * 抬到 40dp（≈120px @3x）后，一根横向为主的手势根本走不到这个位移。
          */
-        const val TRIGGER_DISTANCE_DP = 40f
+        const val TRIGGER_DISTANCE_DP_LANDSCAPE = 40f
+
+        /** 竖屏触发距离基准（1.32.7 抬到 45dp；横屏保持 40dp 不动）。 */
+        const val TRIGGER_DISTANCE_DP_PORTRAIT = 45f
 
         /** 灵敏度对触发距离的微调幅度（dp）：灵敏度 100 → -8dp，0 → +8dp。 */
         const val TRIGGER_DISTANCE_RANGE_DP = 8f

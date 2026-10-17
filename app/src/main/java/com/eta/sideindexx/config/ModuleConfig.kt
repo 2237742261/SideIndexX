@@ -42,6 +42,8 @@ object PrefKeys {
     const val IMMERSIVE = "immersive"
     /** 游戏中屏蔽手势（ColorOS 游戏模式信号 debug_gamemode_value），仅全局索引开启时生效 */
     const val GAME_BLOCK = "game_block"
+    /** 横屏时暂停呼出（1.32.6）：横屏下不响应侧滑，切回竖屏恢复 */
+    const val LANDSCAPE_PAUSE = "landscape_pause"
     /** 应用黑名单（逗号分隔包名）：这些应用里不响应呼出 */
     const val RELOAD_INTERVAL_MS = "reload_interval_ms"
 }
@@ -115,6 +117,8 @@ data class ModuleConfig(
     val immersive: Boolean = false,
     /** 游戏中屏蔽手势（仅全局索引开启时才有意义；桌面呼出不受影响） */
     val gameBlock: Boolean = true,
+    /** 横屏时暂停呼出（1.32.6）：横屏下不响应侧滑，切回竖屏恢复 */
+    val landscapePause: Boolean = true,
     /** 应用黑名单：这些应用里不响应呼出（逗号分隔包名） */
     val blacklist: String = "",
     val logVerbose: Boolean = false,
@@ -198,6 +202,7 @@ data class ModuleConfig(
                 gridColumns = src.getInt(PrefKeys.GRID_COLUMNS, 5).coerceIn(4, 5),
                 immersive = src.getBoolean(PrefKeys.IMMERSIVE, false),
                 gameBlock = src.getBoolean(PrefKeys.GAME_BLOCK, true),
+                landscapePause = src.getBoolean(PrefKeys.LANDSCAPE_PAUSE, true),
                 blacklist = src.getString(PrefKeys.BLACKLIST, "")?.trim() ?: "",
                 logVerbose = src.getBoolean(PrefKeys.LOG_VERBOSE, false),
                 reloadIntervalMs = src.getInt(PrefKeys.RELOAD_INTERVAL_MS, 1200).coerceIn(300, 10_000),

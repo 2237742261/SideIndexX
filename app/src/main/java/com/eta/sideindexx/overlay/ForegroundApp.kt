@@ -258,7 +258,12 @@ object ForegroundApp {
                     "桌面在场判定：任务=$taskCount 桌面可见=$launcherVisible" +
                         if (launcherVisible) " → 按桌面处理" else " → 按非桌面处理"
                 )
-                if (launcherVisible) return true
+                // 能拿到任务列表时以「桌面是否可见」为准（1.32.7）。
+                // 以前这里桌面不可见还会继续掉进下面的 fallback（focusedMode != 全屏 → 视为
+                // 桌面+小窗/分屏）返回 true —— 全屏应用里 focusedMode 实测有时不是 1，就会被误判，
+                // 表现：只桌面模式下应用内侧滑照样呼出索引。小窗/分屏场景桌面仍 visible=true，
+                // 仍会走 launcherVisible 放行，不受影响。
+                return launcherVisible
             }
             val focused = try {
                 LxApi.callMethod(service, "getFocusedRootTaskInfo")

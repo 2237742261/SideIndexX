@@ -83,6 +83,7 @@ object PrefStore {
         editor.putInt(PrefKeys.GRID_COLUMNS, c.gridColumns)
         editor.putBoolean(PrefKeys.IMMERSIVE, c.immersive)
         editor.putBoolean(PrefKeys.GAME_BLOCK, c.gameBlock)
+        editor.putBoolean(PrefKeys.LANDSCAPE_PAUSE, c.landscapePause)
         editor.putString(PrefKeys.BLACKLIST, c.blacklist)
         editor.putBoolean(PrefKeys.LOG_VERBOSE, c.logVerbose)
         editor.putInt(PrefKeys.RELOAD_INTERVAL_MS, c.reloadIntervalMs)

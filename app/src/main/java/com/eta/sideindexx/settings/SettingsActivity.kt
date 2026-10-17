@@ -195,6 +195,14 @@ class SettingsActivity : Activity() {
             PrefStore.write(this) { it.putBoolean(PrefKeys.GAME_BLOCK, v) }
             buildUi()
         }
+        switchRow(
+            "横屏时暂停",
+            "横屏时不呼出（竖屏照常）",
+            config.landscapePause
+        ) { v ->
+            PrefStore.write(this) { it.putBoolean(PrefKeys.LANDSCAPE_PAUSE, v) }
+            buildUi()
+        }
         actionRow(
             "应用黑名单",
             if (config.blacklist.isBlank()) "还没添加（需开启「全局呼出索引」，这些应用里不响应呼出）"
@@ -238,7 +246,7 @@ class SettingsActivity : Activity() {
             buildUi()
         }
         actionRow(
-            "重启系统界面（应用改动）",
+            "重启系统界面",
             "点一下立即生效，不用重启手机"
         ) { restartSystemUi() }
         actionRow("恢复默认设置", null) { confirmReset() }
